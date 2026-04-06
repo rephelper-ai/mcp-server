@@ -1,0 +1,39 @@
+{
+  "name": "@rephelper/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for REP Helper — let AI agents manage real estate activities and properties",
+  "type": "module",
+  "bin": {
+    "rephelper-mcp-server": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["mcp", "rephelper", "real-estate", "ai", "claude", "model-context-protocol"],
+  "author": "REP Helper <support@rephelper.ai>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rephelper-ai/mcp-server.git"
+  },
+  "homepage": "https://rephelper.ai",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "openapi.yaml"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.8.0"
+  }
+}
