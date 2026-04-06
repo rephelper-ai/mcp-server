@@ -1,0 +1,1585 @@
+openapi: 3.1.0
+info:
+  title: REP Helper API
+  version: 1.0.0
+  description: |
+    The REP Helper REST API allows Elite-tier subscribers to programmatically manage
+    their real estate activities and properties for IRS Real Estate Professional (REP)
+    qualification tracking.
+
+    ## Authentication
+
+    All requests require a Bearer token in the `Authorization` header:
+
+    ```
+    Authorization: Bearer rh_live_<token>
+    ```
+
+    API tokens are created and managed in the REP Helper dashboard under
+    **Settings → API Tokens**. Each token has granular permissions
+    (e.g., `activities:read`, `activities:create`) and can optionally be scoped
+    to specific IP addresses.
+
+    **Token format:** `rh_live_` followed by a 32-character random string.
+
+    ## Rate Limits
+
+    | Operation type | Limit |
+    |---|---|
+    | Read (GET) | 60 requests / minute per token |
+    | Write (POST, PUT) | 30 requests / minute per token |
+    | Delete (DELETE) | 5 requests / minute per token |
+
+    Exceeding a rate limit returns HTTP `429` with error code `rate_limited`.
+
+    ## Response Envelope
+
+    All successful responses are wrapped in a `data` envelope:
+
+    ```json
+    {
+      "data": { ... },
+      "meta": {
+        "requestId": "api_1714000000000",
+        "tokenPrefix": "rh_live_a1b2"
+      }
+    }
+    ```
+
+    All error responses are wrapped in an `error` envelope:
+
+    ```json
+    {
+      "error": {
+        "code": "not_found",
+        "message": "Activity not found"
+      },
+      "meta": {
+        "requestId": "api_1714000000000"
+      }
+    }
+    ```
+
+    ## Pagination
+
+    List endpoints support cursor-based pagination. Pass the `id` of the last
+    item in the current page as `startAfter` to fetch the next page.
+
+    ## Soft Deletes
+
+    DELETE operations are **soft deletes** — the record is hidden from API
+    responses but recoverable within 72 hours via the REP Helper dashboard.
+    All DELETE requests require the `X-Confirm-Delete: true` header as a
+    safety guard.
+
+    ## Tier Requirement
+
+    API access requires an active **Elite** subscription. Requests from accounts
+    on lower tiers return HTTP `403` with error code `tier_required`.
+
+  contact:
+    name: REP Helper Support
+    url: https://rephelper.ai/support
+  license:
+    name: Proprietary
+    url: https://rephelper.ai/terms
+
+servers:
+  - url: https://api.rephelper.ai
+    description: Production
+
+tags:
+  - name: Activities
+    description: |
+      Real estate activities logged for IRS REP qualification tracking.
+      Activities record work performed on rental properties including management,
+      maintenance, development, acquisition, and administrative tasks.
+  - name: Properties
+    description: |
+      Rental properties associated with the account. Properties are either
+      Short-Term Rental (STR) or Long-Term Rental (LTR) and anchor activity
+      time logs to specific assets.
+
+# ---------------------------------------------------------------------------
+# Security scheme
+# ---------------------------------------------------------------------------
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: rh_live_<token>
+      description: |
+        API token in `rh_live_*` format. Created in REP Helper dashboard under
+        Settings → API Tokens. Requires an active Elite subscription.
+
+  # ---------------------------------------------------------------------------
+  # Reusable schemas
+  # ---------------------------------------------------------------------------
+
+  schemas:
+
+    # --- Enums ---
+
+    ActivityCategory:
+      type: string
+      enum:
+        - 'Management & Operations'
+        - 'Maintenance & Repairs'
+        - 'Development & Construction'
+        - 'Acquisition & Brokerage'
+        - 'Administrative & Compliance'
+      description: |
+        IRS-aligned category for the activity.
+        - **Management & Operations** — Day-to-day management, tenant relations, leasing
+        - **Maintenance & Repairs** — Physical upkeep, repairs, inspections
+        - **Development & Construction** — Renovations, improvements, new construction oversight
+        - **Acquisition & Brokerage** — Property search, due diligence, closings
+        - **Administrative & Compliance** — Bookkeeping, taxes, legal, insurance
+
+    IrsTest:
+      type: string
+      enum:
+        - '750_HOURS'
+        - 'MORE_THAN_50_PERCENT'
+        - 'BOTH'
+        - 'NONE'
+      description: |
+        Which IRS REP test(s) this activity's qualifying hours count toward.
+        - **750_HOURS** — Counts toward the 750 qualifying hours test only
+        - **MORE_THAN_50_PERCENT** — Counts toward the >50% test only
+        - **BOTH** — Counts toward both tests
+        - **NONE** — Does not count toward either REP test
+
+    PropertyType:
+      type: string
+      enum:
+        - SHORT_TERM
+        - LONG_TERM
+      description: |
+        - **SHORT_TERM** — Short-Term Rental (average guest stay ≤7 days; STR)
+        - **LONG_TERM** — Long-Term Rental (traditional rental; LTR)
+
+    # --- Common sub-objects ---
+
+    PropertyAddress:
+      type: object
+      description: Physical address of the property.
+      required:
+        - streetLine1
+        - city
+        - state
+        - postalCode
+      properties:
+        streetLine1:
+          type: string
+          description: Primary street address line.
+          example: '123 Main St'
+        streetLine2:
+          type: string
+          nullable: true
+          description: Apartment, unit, suite, or other secondary address line.
+          example: 'Unit 4B'
+        city:
+          type: string
+          description: City name.
+          example: 'Austin'
+        state:
+          type: string
+          description: Two-letter US state code.
+          example: 'TX'
+        postalCode:
+          type: string
+          description: ZIP or postal code.
+          example: '78701'
+        country:
+          type: string
+          description: Two-letter ISO 3166-1 alpha-2 country code. Defaults to `US`.
+          default: 'US'
+          example: 'US'
+
+    # --- Response meta ---
+
+    ResponseMeta:
+      type: object
+      description: Metadata included with every response.
+      required:
+        - requestId
+        - tokenPrefix
+      properties:
+        requestId:
+          type: string
+          description: Unique identifier for this request, useful for support and debugging.
+          example: 'api_1714000000000'
+        tokenPrefix:
+          type: string
+          description: First 12 characters of the API token used, for audit purposes.
+          example: 'rh_live_a1b2'
+
+    ErrorMeta:
+      type: object
+      description: Metadata included with error responses.
+      required:
+        - requestId
+      properties:
+        requestId:
+          type: string
+          description: Unique identifier for this request.
+          example: 'api_1714000000000'
+
+    ErrorBody:
+      type: object
+      description: Error code and human-readable message.
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+          example: 'not_found'
+        message:
+          type: string
+          description: Human-readable description of the error.
+          example: 'Activity not found'
+
+    # --- Activity schemas ---
+
+    ActivityObject:
+      type: object
+      description: |
+        A fully-hydrated Activity document as stored in Firestore.
+        Timestamps are ISO 8601 strings in API responses.
+      required:
+        - id
+        - accountId
+        - title
+        - category
+        - startTime
+        - endTime
+        - durationMinutes
+        - isMaterialParticipation
+        - isQualifying
+        - irsTest
+        - source
+        - createdVia
+        - isDraft
+        - evidence
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: Unique Firestore document ID for the activity.
+          example: 'xK9mN3pQ7rTvWyZa'
+        accountId:
+          type: string
+          description: Account that owns this activity.
+          example: 'acc_abc123'
+        performedBy:
+          type: string
+          description: User ID of the token owner who created this activity via the API.
+          example: 'usr_xyz789'
+        userId:
+          type: string
+          description: User ID associated with this activity.
+          example: 'usr_xyz789'
+        primaryUserId:
+          type: string
+          description: Primary account owner's user ID.
+          example: 'usr_xyz789'
+        title:
+          type: string
+          description: Short descriptive title of the activity.
+          example: 'Coordinated plumber visit for unit 3B leak repair'
+        description:
+          type: string
+          description: Detailed notes about the activity.
+          example: 'Called licensed plumber, supervised repair of burst pipe under kitchen sink.'
+        category:
+          $ref: '#/components/schemas/ActivityCategory'
+        startTime:
+          type: string
+          format: date-time
+          description: When the activity started (ISO 8601).
+          example: '2025-03-15T09:00:00.000Z'
+        endTime:
+          type: string
+          format: date-time
+          description: When the activity ended (ISO 8601).
+          example: '2025-03-15T11:30:00.000Z'
+        durationMinutes:
+          type: integer
+          description: |
+            Total duration of the activity in minutes, including any trip time.
+            If `tripIds` are provided, `durationMinutes = baseDurationMinutes + tripDurationMinutes`.
+          example: 150
+        baseDurationMinutes:
+          type: integer
+          description: |
+            Core activity duration in minutes, excluding trip time.
+            Only present when `tripIds` is non-empty.
+          example: 120
+        tripDurationMinutes:
+          type: integer
+          description: |
+            Total travel time from associated trips in minutes.
+            Only present when `tripIds` is non-empty.
+          example: 30
+        propertyId:
+          type: string
+          nullable: true
+          description: ID of the associated property, or `null` if not property-specific.
+          example: 'prop_def456'
+        teamMemberId:
+          type: string
+          description: |
+            ID of the team member (from `accounts/{accountId}/members`) who performed
+            this activity. Only present when explicitly set.
+          example: 'mem_ghi012'
+        isMaterialParticipation:
+          type: boolean
+          description: |
+            Whether this activity counts toward material participation tests
+            (100h, 500h, or 90% tests). Applies to both LTR and STR properties.
+          example: true
+        isQualifying:
+          type: boolean
+          description: |
+            Whether this activity counts as a qualifying activity for REP status
+            (750h and >50% tests). Only LTR activities can be qualifying.
+          example: true
+        qualificationReason:
+          type: string
+          nullable: true
+          description: Free-text explanation of why this activity qualifies for REP status.
+          example: 'Management of long-term rental property — directly involved in decision-making'
+        irsTest:
+          $ref: '#/components/schemas/IrsTest'
+        source:
+          type: string
+          description: How the activity was originally created. API-created activities always have `MANUAL`.
+          example: 'MANUAL'
+        createdVia:
+          type: string
+          description: Creation mechanism. API-created activities always have `OTHER`.
+          example: 'OTHER'
+        isDraft:
+          type: boolean
+          description: |
+            Whether the activity is a draft. Draft activities are excluded from
+            IRS metrics calculations until published (set `isDraft: false`).
+          example: false
+        tripIds:
+          type: array
+          items:
+            type: string
+          description: |
+            IDs of trip records associated with this activity. Each trip contributes
+            its `durationMinutes` to the total. Maximum 3 trips per activity.
+          example: ['trip_111', 'trip_222']
+        evidence:
+          type: array
+          items:
+            type: string
+          description: Array of evidence document IDs linked to this activity.
+          example: ['ev_jkl345', 'ev_mno678']
+        createdAt:
+          type: string
+          format: date-time
+          description: When the activity record was created (ISO 8601).
+          example: '2025-03-15T11:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the activity record was last updated (ISO 8601).
+          example: '2025-03-15T11:30:00.000Z'
+
+    ActivityCreateRequest:
+      type: object
+      description: |
+        Request body to create a new activity. Supports both `application/json`
+        and `multipart/form-data` (the latter when attaching evidence files).
+      required:
+        - title
+        - category
+        - startTime
+        - endTime
+      properties:
+        title:
+          type: string
+          description: Short descriptive title of the activity.
+          example: 'Coordinated plumber visit for unit 3B leak repair'
+        category:
+          $ref: '#/components/schemas/ActivityCategory'
+        startTime:
+          type: string
+          format: date-time
+          description: Activity start time (ISO 8601 or any date string parseable by `new Date()`).
+          example: '2025-03-15T09:00:00.000Z'
+        endTime:
+          type: string
+          format: date-time
+          description: Activity end time (ISO 8601 or any date string parseable by `new Date()`).
+          example: '2025-03-15T11:30:00.000Z'
+        description:
+          type: string
+          description: Detailed notes about the activity.
+          example: 'Supervised licensed plumber repairing burst pipe under kitchen sink.'
+        propertyId:
+          type: string
+          description: |
+            ID of the property this activity relates to. Must belong to this account.
+            Omit or pass `null` for account-level activities not tied to a specific property.
+          example: 'prop_def456'
+        teamMemberId:
+          type: string
+          description: |
+            ID of a team member (`accounts/{accountId}/members/{memberId}`) who performed
+            this activity. When set, the activity is attributed to that member.
+          example: 'mem_ghi012'
+        isMaterialParticipation:
+          type: boolean
+          default: false
+          description: Whether this activity counts toward material participation tests.
+          example: true
+        isQualifying:
+          type: boolean
+          default: false
+          description: Whether this activity counts as a qualifying activity for REP status.
+          example: true
+        qualificationReason:
+          type: string
+          description: Free-text explanation of why the activity qualifies for REP status.
+          example: 'Management of long-term rental property'
+        irsTest:
+          $ref: '#/components/schemas/IrsTest'
+          default: 'NONE'
+        isDraft:
+          type: boolean
+          default: false
+          description: |
+            When `true`, the activity is saved as a draft and excluded from metrics
+            until you update it with `isDraft: false`.
+        durationMinutes:
+          type: integer
+          description: |
+            Override the computed duration in minutes. When omitted, duration is
+            calculated as `Math.round((endTime - startTime) / 60000)`.
+            When `tripIds` is also provided, trip time is added on top of this value.
+          example: 150
+        tripIds:
+          type: array
+          items:
+            type: string
+          maxItems: 3
+          description: |
+            Array of trip document IDs to associate with this activity. Each trip's
+            `durationMinutes` is added to the activity's duration. Maximum 3 trips.
+            Trips must belong to this account and not be assigned to another activity.
+          example: ['trip_111', 'trip_222']
+
+    ActivityUpdateRequest:
+      type: object
+      description: |
+        Request body to update an existing activity. All fields are optional —
+        only provided fields are updated. Supports both `application/json` and
+        `multipart/form-data` (the latter when adding new evidence files).
+      properties:
+        title:
+          type: string
+          description: New title for the activity.
+          example: 'Updated: coordinated plumber visit for unit 3B'
+        description:
+          type: string
+          description: Updated notes.
+          example: 'Repair completed. Invoice filed.'
+        category:
+          $ref: '#/components/schemas/ActivityCategory'
+        startTime:
+          type: string
+          format: date-time
+          description: Updated start time.
+          example: '2025-03-15T09:30:00.000Z'
+        endTime:
+          type: string
+          format: date-time
+          description: Updated end time.
+          example: '2025-03-15T12:00:00.000Z'
+        durationMinutes:
+          type: integer
+          description: Override for the activity duration in minutes.
+          example: 150
+        propertyId:
+          type: string
+          nullable: true
+          description: |
+            Update the associated property. Pass `null` to disassociate from any property.
+            Must belong to this account if non-null.
+          example: 'prop_def456'
+        isMaterialParticipation:
+          type: boolean
+          description: Update the material participation flag.
+        isQualifying:
+          type: boolean
+          description: Update the qualifying flag.
+        qualificationReason:
+          type: string
+          nullable: true
+          description: Updated qualification reason.
+        irsTest:
+          $ref: '#/components/schemas/IrsTest'
+        isDraft:
+          type: boolean
+          description: Publish a draft (`false`) or convert back to draft (`true`).
+        tripIds:
+          type: array
+          items:
+            type: string
+          maxItems: 3
+          description: |
+            Replace the full set of associated trip IDs. Trips removed from the list
+            are unassigned; new trips are validated and assigned. Maximum 3 trips.
+          example: ['trip_333']
+        removeEvidenceIds:
+          type: array
+          items:
+            type: string
+          description: |
+            Array of evidence document IDs to unlink from this activity.
+            Evidence documents are not deleted — they remain in your account but
+            are no longer associated with this activity.
+          example: ['ev_jkl345']
+
+    # --- Property schemas ---
+
+    PropertyObject:
+      type: object
+      description: A fully-hydrated Property document.
+      required:
+        - id
+        - ownerAccountId
+        - name
+        - type
+        - address
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: Unique Firestore document ID for the property.
+          example: 'prop_def456'
+        ownerAccountId:
+          type: string
+          description: Account that owns this property.
+          example: 'acc_abc123'
+        ownerUserId:
+          type: string
+          description: User ID of the token owner who created this property via the API.
+          example: 'usr_xyz789'
+        name:
+          type: string
+          description: Friendly display name for the property.
+          example: '123 Main St — Unit 4B'
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          $ref: '#/components/schemas/PropertyAddress'
+        imageUrl:
+          type: string
+          nullable: true
+          description: URL of the property's cover photo, or `null` if not set.
+          example: 'https://storage.googleapis.com/rephelper.appspot.com/properties/...'
+        isActive:
+          type: boolean
+          description: |
+            Whether the property is currently active. Inactive properties are excluded
+            from IRS metric calculations.
+          example: true
+        acquiredDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date the property was acquired (ISO 8601), or `null`.
+          example: '2021-06-15T00:00:00.000Z'
+        placedInServiceDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date the property was placed in service as a rental (ISO 8601), or `null`.
+          example: '2021-07-01T00:00:00.000Z'
+        soldDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date the property was sold (ISO 8601), or `null` if still owned.
+          example: null
+        createdAt:
+          type: string
+          format: date-time
+          description: When the property record was created (ISO 8601).
+          example: '2025-01-10T14:00:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the property record was last updated (ISO 8601).
+          example: '2025-03-01T09:00:00.000Z'
+
+    PropertyCreateRequest:
+      type: object
+      description: Request body to create a new property.
+      required:
+        - name
+        - type
+        - address
+      properties:
+        name:
+          type: string
+          description: Friendly display name for the property.
+          example: '123 Main St — Unit 4B'
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          $ref: '#/components/schemas/PropertyAddress'
+        imageUrl:
+          type: string
+          description: URL of the property's cover photo.
+          example: 'https://example.com/photo.jpg'
+        acquiredDate:
+          type: string
+          format: date-time
+          description: Date the property was acquired (ISO 8601 or parseable date string).
+          example: '2021-06-15'
+        placedInServiceDate:
+          type: string
+          format: date-time
+          description: Date the property was placed in service as a rental.
+          example: '2021-07-01'
+
+    PropertyUpdateRequest:
+      type: object
+      description: |
+        Request body to update an existing property. All fields are optional —
+        only provided fields are updated.
+      properties:
+        name:
+          type: string
+          description: Updated display name.
+          example: '123 Main St — Unit 4B (Renovated)'
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          $ref: '#/components/schemas/PropertyAddress'
+        imageUrl:
+          type: string
+          nullable: true
+          description: Updated cover photo URL. Pass `null` to clear.
+          example: 'https://example.com/new-photo.jpg'
+        isActive:
+          type: boolean
+          description: Set to `false` to deactivate and exclude from metric calculations.
+          example: false
+        acquiredDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Updated acquisition date, or `null` to clear.
+          example: '2021-06-15'
+        placedInServiceDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Updated in-service date, or `null` to clear.
+          example: '2021-07-01'
+        soldDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date the property was sold. Pass `null` to clear a previously set date.
+          example: '2025-12-01'
+
+    # --- Soft-delete response ---
+
+    DeletedResponse:
+      type: object
+      description: Confirmation of a soft-delete operation.
+      required:
+        - id
+        - deleted
+        - recoverable
+        - recoveryExpiresAt
+      properties:
+        id:
+          type: string
+          description: ID of the deleted record.
+          example: 'xK9mN3pQ7rTvWyZa'
+        deleted:
+          type: boolean
+          description: Always `true` for a successful delete.
+          example: true
+        recoverable:
+          type: boolean
+          description: |
+            Always `true`. Soft-deleted records can be recovered via the REP Helper
+            dashboard within the `recoveryExpiresAt` window.
+          example: true
+        recoveryExpiresAt:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp after which the record is permanently purged and
+            unrecoverable. Currently 72 hours from deletion.
+          example: '2025-03-18T11:30:00.000Z'
+
+    # --- Standard error responses ---
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - meta
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+        meta:
+          $ref: '#/components/schemas/ErrorMeta'
+
+  # ---------------------------------------------------------------------------
+  # Reusable parameters
+  # ---------------------------------------------------------------------------
+
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximum number of items to return. Capped at 100.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+      example: 25
+
+    StartAfterParam:
+      name: startAfter
+      in: query
+      description: |
+        Cursor for pagination. Pass the `id` of the last item from the previous
+        page to fetch the next page of results.
+      required: false
+      schema:
+        type: string
+      example: 'xK9mN3pQ7rTvWyZa'
+
+    ActivityIdParam:
+      name: id
+      in: path
+      description: Unique Firestore document ID of the activity.
+      required: true
+      schema:
+        type: string
+      example: 'xK9mN3pQ7rTvWyZa'
+
+    PropertyIdParam:
+      name: id
+      in: path
+      description: Unique Firestore document ID of the property.
+      required: true
+      schema:
+        type: string
+      example: 'prop_def456'
+
+  # ---------------------------------------------------------------------------
+  # Reusable responses
+  # ---------------------------------------------------------------------------
+
+  responses:
+    Unauthorized:
+      description: |
+        Authentication failed. Common error codes:
+        - `unauthenticated` — Missing or malformed `Authorization` header
+        - `invalid_token` — Token not found or invalid format
+        - `token_expired` — Token has expired or rotated grace period has ended
+        - `token_revoked` — Token has been revoked or suspended
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missing_header:
+              summary: Missing Authorization header
+              value:
+                error:
+                  code: unauthenticated
+                  message: 'Missing or invalid Authorization header. Use: Bearer rh_live_<token>'
+                meta:
+                  requestId: 'api_1714000000000'
+            invalid_token:
+              summary: Token not found
+              value:
+                error:
+                  code: invalid_token
+                  message: 'Token not found'
+                meta:
+                  requestId: 'api_1714000000000'
+            token_expired:
+              summary: Token expired
+              value:
+                error:
+                  code: token_expired
+                  message: 'Token has expired'
+                meta:
+                  requestId: 'api_1714000000000'
+            token_revoked:
+              summary: Token revoked
+              value:
+                error:
+                  code: token_revoked
+                  message: 'Token is revoked'
+                meta:
+                  requestId: 'api_1714000000000'
+
+    Forbidden:
+      description: |
+        Authorization failed. Common error codes:
+        - `tier_required` — Account is not on an active Elite plan
+        - `permission_denied` — Token lacks the required permission for this action
+        - `ip_not_allowed` — Client IP is not in the token's IP allowlist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            tier_required:
+              summary: Elite subscription required
+              value:
+                error:
+                  code: tier_required
+                  message: 'API access requires an Elite subscription. Your account has been downgraded.'
+                meta:
+                  requestId: 'api_1714000000000'
+            permission_denied:
+              summary: Token lacks required permission
+              value:
+                error:
+                  code: permission_denied
+                  message: 'Token lacks activities:create permission'
+                meta:
+                  requestId: 'api_1714000000000'
+            ip_not_allowed:
+              summary: Client IP not in allowlist
+              value:
+                error:
+                  code: ip_not_allowed
+                  message: 'Request IP is not in the token allowlist'
+                meta:
+                  requestId: 'api_1714000000000'
+
+    NotFound:
+      description: The requested resource does not exist or does not belong to this account.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: not_found
+              message: 'Activity not found'
+            meta:
+              requestId: 'api_1714000000000'
+
+    BadRequest:
+      description: |
+        The request is malformed or validation failed. Common error codes:
+        - `invalid_argument` — A required field is missing or a field value is invalid
+        - `delete_confirmation_required` — `X-Confirm-Delete: true` header is missing on DELETE
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missing_field:
+              summary: Required field missing
+              value:
+                error:
+                  code: invalid_argument
+                  message: 'title is required'
+                meta:
+                  requestId: 'api_1714000000000'
+            invalid_category:
+              summary: Invalid enum value
+              value:
+                error:
+                  code: invalid_argument
+                  message: "category must be one of: Management & Operations, Maintenance & Repairs, Development & Construction, Acquisition & Brokerage, Administrative & Compliance"
+                meta:
+                  requestId: 'api_1714000000000'
+            delete_confirmation:
+              summary: Missing delete confirmation header
+              value:
+                error:
+                  code: delete_confirmation_required
+                  message: 'DELETE requests require the X-Confirm-Delete: true header for safety'
+                meta:
+                  requestId: 'api_1714000000000'
+
+    RateLimited:
+      description: Too many requests. Retry after the rate-limit window resets (1 minute).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: rate_limited
+              message: 'Too many requests. Try again later.'
+            meta:
+              requestId: 'api_1714000000000'
+
+# ---------------------------------------------------------------------------
+# Global security
+# ---------------------------------------------------------------------------
+
+security:
+  - bearerAuth: []
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+paths:
+
+  # ==========================================================================
+  # ACTIVITIES
+  # ==========================================================================
+
+  /v1/activities:
+    get:
+      operationId: listActivities
+      summary: List activities
+      description: |
+        Returns a paginated list of activities for this account, ordered by
+        `startTime` descending (most recent first).
+
+        Soft-deleted activities are excluded. Date range filtering is applied
+        in-process after the database query.
+
+        **Required permission:** `activities:read`
+      tags:
+        - Activities
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/StartAfterParam'
+        - name: propertyId
+          in: query
+          description: Filter activities to a specific property ID.
+          required: false
+          schema:
+            type: string
+          example: 'prop_def456'
+        - name: startDate
+          in: query
+          description: |
+            Only return activities with `startTime` on or after this date/time (ISO 8601).
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: '2025-01-01T00:00:00.000Z'
+        - name: endDate
+          in: query
+          description: |
+            Only return activities with `startTime` on or before this date/time (ISO 8601).
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: '2025-12-31T23:59:59.999Z'
+        - name: category
+          in: query
+          description: Filter by activity category.
+          required: false
+          schema:
+            $ref: '#/components/schemas/ActivityCategory'
+          example: 'Maintenance & Repairs'
+      responses:
+        '200':
+          description: Paginated list of activities.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+              example:
+                data:
+                  - id: xK9mN3pQ7rTvWyZa
+                    accountId: acc_abc123
+                    title: Coordinated plumber visit for unit 3B
+                    category: 'Maintenance & Repairs'
+                    startTime: '2025-03-15T09:00:00.000Z'
+                    endTime: '2025-03-15T11:30:00.000Z'
+                    durationMinutes: 150
+                    propertyId: prop_def456
+                    isMaterialParticipation: true
+                    isQualifying: true
+                    irsTest: BOTH
+                    isDraft: false
+                    source: MANUAL
+                    createdVia: OTHER
+                    evidence: []
+                    createdAt: '2025-03-15T11:30:00.000Z'
+                    updatedAt: '2025-03-15T11:30:00.000Z'
+                meta:
+                  requestId: api_1714000000000
+                  tokenPrefix: rh_live_a1b2
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    post:
+      operationId: createActivity
+      summary: Create activity
+      description: |
+        Creates a new activity. Returns `201 Created` with the full activity object.
+
+        Supports two content types:
+        - **`application/json`** — Send fields as JSON. Cannot attach evidence files.
+        - **`multipart/form-data`** — Send fields as form data parts and optionally attach
+          up to 3 evidence files (receipts, documents) in `file` parts. Each file
+          is uploaded to Firebase Storage and an evidence document is created automatically.
+
+        **Required permission:** `activities:create`
+      tags:
+        - Activities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityCreateRequest'
+            example:
+              title: Coordinated plumber visit for unit 3B
+              category: 'Maintenance & Repairs'
+              startTime: '2025-03-15T09:00:00.000Z'
+              endTime: '2025-03-15T11:30:00.000Z'
+              description: Supervised licensed plumber repairing burst pipe.
+              propertyId: prop_def456
+              isMaterialParticipation: true
+              isQualifying: true
+              irsTest: BOTH
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ActivityCreateRequest'
+                - type: object
+                  properties:
+                    file:
+                      type: array
+                      items:
+                        type: string
+                        format: binary
+                      description: |
+                        Evidence files to attach (receipts, invoices, documents).
+                        Accepted MIME types: `image/jpeg`, `image/png`, `image/webp`,
+                        `image/gif`, `application/pdf`. Maximum 3 files per activity.
+                        Each file is stored in Firebase Storage and linked to the activity.
+      responses:
+        '201':
+          description: Activity created successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ActivityObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/activities/{id}:
+    get:
+      operationId: getActivity
+      summary: Get activity
+      description: |
+        Returns a single activity by ID.
+
+        Returns `404` if the activity does not exist, has been soft-deleted,
+        or belongs to a different account.
+
+        **Required permission:** `activities:read`
+      tags:
+        - Activities
+      parameters:
+        - $ref: '#/components/parameters/ActivityIdParam'
+      responses:
+        '200':
+          description: Activity found.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ActivityObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    put:
+      operationId: updateActivity
+      summary: Update activity
+      description: |
+        Updates an existing activity. Only provided fields are changed (partial update).
+
+        Supports two content types:
+        - **`application/json`** — Send fields as JSON. Cannot upload new evidence files.
+        - **`multipart/form-data`** — Send fields as form data parts and optionally upload
+          new evidence files. Use `removeEvidenceIds` to unlink existing evidence first.
+
+        **Evidence management:**
+        - Add evidence: include `file` parts (multipart only). Max 3 files total per activity.
+        - Remove evidence: include `removeEvidenceIds` array with evidence document IDs.
+          The evidence documents are unlinked from the activity but not deleted.
+
+        **Trip management:**
+        - Provide `tripIds` to replace the full set of associated trips.
+        - Trips removed from the list are unassigned; new trips are validated and assigned.
+
+        Returns `404` if the activity does not exist, has been soft-deleted,
+        or belongs to a different account.
+
+        **Required permission:** `activities:update`
+      tags:
+        - Activities
+      parameters:
+        - $ref: '#/components/parameters/ActivityIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityUpdateRequest'
+            example:
+              title: 'Updated: plumber visit for unit 3B — repair complete'
+              isDraft: false
+              removeEvidenceIds: ['ev_old123']
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ActivityUpdateRequest'
+                - type: object
+                  properties:
+                    file:
+                      type: array
+                      items:
+                        type: string
+                        format: binary
+                      description: |
+                        New evidence files to attach. Combined with existing evidence,
+                        total cannot exceed 3 files per activity.
+      responses:
+        '200':
+          description: Activity updated successfully. Returns the full updated activity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ActivityObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    delete:
+      operationId: deleteActivity
+      summary: Delete activity (soft delete)
+      description: |
+        Soft-deletes an activity. The record is hidden from all API responses but
+        remains in the database and is **recoverable within 72 hours** via the REP
+        Helper dashboard.
+
+        **Safety header required:** All DELETE requests must include the header
+        `X-Confirm-Delete: true`. Omitting this header returns `400` with error
+        code `delete_confirmation_required`.
+
+        After the 72-hour recovery window expires, the record is permanently purged.
+
+        Returns `404` if the activity does not exist, is already soft-deleted,
+        or belongs to a different account.
+
+        **Required permission:** `activities:delete`
+      tags:
+        - Activities
+      parameters:
+        - $ref: '#/components/parameters/ActivityIdParam'
+        - name: X-Confirm-Delete
+          in: header
+          description: Must be `true` to confirm the delete operation.
+          required: true
+          schema:
+            type: string
+            enum: ['true']
+          example: 'true'
+      responses:
+        '200':
+          description: Activity soft-deleted successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DeletedResponse'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+              example:
+                data:
+                  id: xK9mN3pQ7rTvWyZa
+                  deleted: true
+                  recoverable: true
+                  recoveryExpiresAt: '2025-03-18T11:30:00.000Z'
+                meta:
+                  requestId: api_1714000000000
+                  tokenPrefix: rh_live_a1b2
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  # ==========================================================================
+  # PROPERTIES
+  # ==========================================================================
+
+  /v1/properties:
+    get:
+      operationId: listProperties
+      summary: List properties
+      description: |
+        Returns a paginated list of properties for this account, ordered by
+        `createdAt` ascending.
+
+        Soft-deleted properties are excluded.
+
+        **Required permission:** `properties:read`
+      tags:
+        - Properties
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/StartAfterParam'
+        - name: type
+          in: query
+          description: Filter by property type.
+          required: false
+          schema:
+            $ref: '#/components/schemas/PropertyType'
+          example: LONG_TERM
+      responses:
+        '200':
+          description: Paginated list of properties.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PropertyObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+              example:
+                data:
+                  - id: prop_def456
+                    ownerAccountId: acc_abc123
+                    name: '123 Main St — Unit 4B'
+                    type: LONG_TERM
+                    address:
+                      streetLine1: '123 Main St'
+                      streetLine2: 'Unit 4B'
+                      city: Austin
+                      state: TX
+                      postalCode: '78701'
+                      country: US
+                    imageUrl: null
+                    isActive: true
+                    acquiredDate: '2021-06-15T00:00:00.000Z'
+                    placedInServiceDate: '2021-07-01T00:00:00.000Z'
+                    soldDate: null
+                    createdAt: '2025-01-10T14:00:00.000Z'
+                    updatedAt: '2025-01-10T14:00:00.000Z'
+                meta:
+                  requestId: api_1714000000000
+                  tokenPrefix: rh_live_a1b2
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    post:
+      operationId: createProperty
+      summary: Create property
+      description: |
+        Creates a new property. Returns `201 Created` with the full property object.
+
+        **Note:** Properties created via the API are not counted toward plan property
+        limits, as API access is Elite-only (unlimited properties).
+
+        **Required permission:** `properties:create`
+      tags:
+        - Properties
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyCreateRequest'
+            example:
+              name: '456 Oak Ave'
+              type: SHORT_TERM
+              address:
+                streetLine1: '456 Oak Ave'
+                city: Nashville
+                state: TN
+                postalCode: '37201'
+              acquiredDate: '2023-04-01'
+              placedInServiceDate: '2023-05-15'
+      responses:
+        '201':
+          description: Property created successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PropertyObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/properties/{id}:
+    get:
+      operationId: getProperty
+      summary: Get property
+      description: |
+        Returns a single property by ID.
+
+        Returns `404` if the property does not exist, has been soft-deleted,
+        or belongs to a different account.
+
+        **Required permission:** `properties:read`
+      tags:
+        - Properties
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdParam'
+      responses:
+        '200':
+          description: Property found.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PropertyObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    put:
+      operationId: updateProperty
+      summary: Update property
+      description: |
+        Updates an existing property. Only provided fields are changed (partial update).
+
+        Returns `404` if the property does not exist, has been soft-deleted,
+        or belongs to a different account.
+
+        **Required permission:** `properties:update`
+      tags:
+        - Properties
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyUpdateRequest'
+            example:
+              name: '456 Oak Ave (Updated)'
+              isActive: false
+              soldDate: '2025-12-01'
+      responses:
+        '200':
+          description: Property updated successfully. Returns the full updated property.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PropertyObject'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    delete:
+      operationId: deleteProperty
+      summary: Delete property (soft delete)
+      description: |
+        Soft-deletes a property. The record is hidden from all API responses but
+        remains in the database and is **recoverable within 72 hours** via the REP
+        Helper dashboard.
+
+        **Safety header required:** All DELETE requests must include the header
+        `X-Confirm-Delete: true`. Omitting this header returns `400` with error
+        code `delete_confirmation_required`.
+
+        After the 72-hour recovery window expires, the record is permanently purged.
+
+        Returns `404` if the property does not exist, is already soft-deleted,
+        or belongs to a different account.
+
+        **Required permission:** `properties:delete`
+      tags:
+        - Properties
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdParam'
+        - name: X-Confirm-Delete
+          in: header
+          description: Must be `true` to confirm the delete operation.
+          required: true
+          schema:
+            type: string
+            enum: ['true']
+          example: 'true'
+      responses:
+        '200':
+          description: Property soft-deleted successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DeletedResponse'
+                  meta:
+                    $ref: '#/components/schemas/ResponseMeta'
+              example:
+                data:
+                  id: prop_def456
+                  deleted: true
+                  recoverable: true
+                  recoveryExpiresAt: '2025-03-18T11:30:00.000Z'
+                meta:
+                  requestId: api_1714000000000
+                  tokenPrefix: rh_live_a1b2
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
