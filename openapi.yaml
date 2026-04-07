@@ -971,8 +971,23 @@ paths:
       tags:
         - Activities
       parameters:
-        - $ref: '#/components/parameters/LimitParam'
-        - $ref: '#/components/parameters/StartAfterParam'
+        - name: limit
+          in: query
+          description: Maximum number of items to return. Capped at 100.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 25
+        - name: startAfter
+          in: query
+          description: Cursor for pagination. Pass the id of the last item from the previous page.
+          required: false
+          schema:
+            type: string
+          example: 'xK9mN3pQ7rTvWyZa'
         - name: propertyId
           in: query
           description: Filter activities to a specific property ID.
@@ -1055,15 +1070,7 @@ paths:
       operationId: createActivity
       summary: Create activity
       description: |
-        Creates a new activity. Returns `201 Created` with the full activity object.
-
-        Supports two content types:
-        - **`application/json`** — Send fields as JSON. Cannot attach evidence files.
-        - **`multipart/form-data`** — Send fields as form data parts and optionally attach
-          up to 3 evidence files (receipts, documents) in `file` parts. Each file
-          is uploaded to Firebase Storage and an evidence document is created automatically.
-
-        **Required permission:** `activities:create`
+        Creates a new activity. Supports JSON or multipart/form-data (to attach up to 3 evidence files). Returns 201 with the full activity object. Permission: activities:create.
       tags:
         - Activities
       requestBody:
@@ -1136,7 +1143,13 @@ paths:
       tags:
         - Activities
       parameters:
-        - $ref: '#/components/parameters/ActivityIdParam'
+        - name: id
+          in: path
+          description: Unique document ID of the activity.
+          required: true
+          schema:
+            type: string
+          example: 'xK9mN3pQ7rTvWyZa'
       responses:
         '200':
           description: Activity found.
@@ -1165,30 +1178,17 @@ paths:
       operationId: updateActivity
       summary: Update activity
       description: |
-        Updates an existing activity. Only provided fields are changed (partial update).
-
-        Supports two content types:
-        - **`application/json`** — Send fields as JSON. Cannot upload new evidence files.
-        - **`multipart/form-data`** — Send fields as form data parts and optionally upload
-          new evidence files. Use `removeEvidenceIds` to unlink existing evidence first.
-
-        **Evidence management:**
-        - Add evidence: include `file` parts (multipart only). Max 3 files total per activity.
-        - Remove evidence: include `removeEvidenceIds` array with evidence document IDs.
-          The evidence documents are unlinked from the activity but not deleted.
-
-        **Trip management:**
-        - Provide `tripIds` to replace the full set of associated trips.
-        - Trips removed from the list are unassigned; new trips are validated and assigned.
-
-        Returns `404` if the activity does not exist, has been soft-deleted,
-        or belongs to a different account.
-
-        **Required permission:** `activities:update`
+        Partial update of an activity. Supports JSON or multipart/form-data (to attach new evidence files). Use removeEvidenceIds to unlink evidence. Permission: activities:update.
       tags:
         - Activities
       parameters:
-        - $ref: '#/components/parameters/ActivityIdParam'
+        - name: id
+          in: path
+          description: Unique document ID of the activity.
+          required: true
+          schema:
+            type: string
+          example: 'xK9mN3pQ7rTvWyZa'
       requestBody:
         required: true
         content:
@@ -1243,32 +1243,17 @@ paths:
       operationId: deleteActivity
       summary: Delete activity (soft delete)
       description: |
-        Soft-deletes an activity. The record is hidden from all API responses but
-        remains in the database and is **recoverable within 72 hours** via the REP
-        Helper dashboard.
-
-        **Safety header required:** All DELETE requests must include the header
-        `X-Confirm-Delete: true`. Omitting this header returns `400` with error
-        code `delete_confirmation_required`.
-
-        After the 72-hour recovery window expires, the record is permanently purged.
-
-        Returns `404` if the activity does not exist, is already soft-deleted,
-        or belongs to a different account.
-
-        **Required permission:** `activities:delete`
+        Soft-deletes an activity. Recoverable within 72 hours via the dashboard. Requires X-Confirm-Delete: true header. Permission: activities:delete.
       tags:
         - Activities
       parameters:
-        - $ref: '#/components/parameters/ActivityIdParam'
-        - name: X-Confirm-Delete
-          in: header
-          description: Must be `true` to confirm the delete operation.
+        - name: id
+          in: path
+          description: Unique document ID of the activity.
           required: true
           schema:
             type: string
-            enum: ['true']
-          example: 'true'
+          example: 'xK9mN3pQ7rTvWyZa'
       responses:
         '200':
           description: Activity soft-deleted successfully.
@@ -1322,8 +1307,23 @@ paths:
       tags:
         - Properties
       parameters:
-        - $ref: '#/components/parameters/LimitParam'
-        - $ref: '#/components/parameters/StartAfterParam'
+        - name: limit
+          in: query
+          description: Maximum number of items to return. Capped at 100.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 25
+        - name: startAfter
+          in: query
+          description: Cursor for pagination. Pass the id of the last item from the previous page.
+          required: false
+          schema:
+            type: string
+          example: 'xK9mN3pQ7rTvWyZa'
         - name: type
           in: query
           description: Filter by property type.
@@ -1444,7 +1444,13 @@ paths:
       tags:
         - Properties
       parameters:
-        - $ref: '#/components/parameters/PropertyIdParam'
+        - name: id
+          in: path
+          description: Unique document ID of the property.
+          required: true
+          schema:
+            type: string
+          example: 'prop_def456'
       responses:
         '200':
           description: Property found.
@@ -1482,7 +1488,13 @@ paths:
       tags:
         - Properties
       parameters:
-        - $ref: '#/components/parameters/PropertyIdParam'
+        - name: id
+          in: path
+          description: Unique document ID of the property.
+          required: true
+          schema:
+            type: string
+          example: 'prop_def456'
       requestBody:
         required: true
         content:
@@ -1523,32 +1535,17 @@ paths:
       operationId: deleteProperty
       summary: Delete property (soft delete)
       description: |
-        Soft-deletes a property. The record is hidden from all API responses but
-        remains in the database and is **recoverable within 72 hours** via the REP
-        Helper dashboard.
-
-        **Safety header required:** All DELETE requests must include the header
-        `X-Confirm-Delete: true`. Omitting this header returns `400` with error
-        code `delete_confirmation_required`.
-
-        After the 72-hour recovery window expires, the record is permanently purged.
-
-        Returns `404` if the property does not exist, is already soft-deleted,
-        or belongs to a different account.
-
-        **Required permission:** `properties:delete`
+        Soft-deletes a property. Recoverable within 72 hours via the dashboard. Requires X-Confirm-Delete: true header. Permission: properties:delete.
       tags:
         - Properties
       parameters:
-        - $ref: '#/components/parameters/PropertyIdParam'
-        - name: X-Confirm-Delete
-          in: header
-          description: Must be `true` to confirm the delete operation.
+        - name: id
+          in: path
+          description: Unique document ID of the property.
           required: true
           schema:
             type: string
-            enum: ['true']
-          example: 'true'
+          example: 'prop_def456'
       responses:
         '200':
           description: Property soft-deleted successfully.
