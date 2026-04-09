@@ -66,6 +66,38 @@ Add the following to your client's MCP configuration:
 }
 ```
 
+**Gemini CLI** — Edit `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "rephelper": {
+      "command": "npx",
+      "args": ["-y", "@rephelper/mcp-server"],
+      "env": {
+        "REPHELPER_API_TOKEN": "rh_live_your_token_here"
+      }
+    }
+  }
+}
+```
+
+**Windsurf** — Edit `.windsurf/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rephelper": {
+      "command": "npx",
+      "args": ["-y", "@rephelper/mcp-server"],
+      "env": {
+        "REPHELPER_API_TOKEN": "rh_live_your_token_here"
+      }
+    }
+  }
+}
+```
+
 ### 3. Start Using It
 
 Ask your AI assistant to manage your real estate activities:
