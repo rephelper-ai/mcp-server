@@ -105,20 +105,13 @@ function buildMultipartBody(
 ): { body: FormData; } {
   const formData = new FormData();
 
-  // Append each field individually to match the API's multipart schema
-  for (const [key, value] of Object.entries(data)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value) || typeof value === "object") {
-      formData.append(key, JSON.stringify(value));
-    } else {
-      formData.append(key, String(value));
-    }
-  }
+  // Send JSON fields as a single "data" field (API expects this for multipart)
+  formData.append("data", JSON.stringify(data));
 
   for (const filePath of filePaths) {
     const file = validateFile(filePath);
-    const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimeType });
-    formData.append("file", blob, file.filename);
+    const f = new File([new Uint8Array(file.buffer)], file.filename, { type: file.mimeType });
+    formData.append("evidence", f);
   }
 
   return { body: formData };
@@ -171,6 +164,26 @@ export function createClient(config: ClientConfig) {
         headers,
         body: fetchBody,
       });
+
+      // Detect non-JSON responses (HTML error pages from proxies, CDN, or server)
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        // Try to extract a meaningful title from HTML error pages
+        const titleMatch = text.match(/<title>([^<]*)<\/title>/i);
+        const hint = titleMatch?.[1]?.trim();
+        const detail = hint
+          ? `${res.status} ${hint}`
+          : `${res.status} ${res.statusText}`;
+        return {
+          ok: false,
+          status: res.status,
+          code: "non_json_response",
+          message:
+            `Server returned an unexpected response (${detail}). ` +
+            "The API may be experiencing issues, or a proxy/CDN rejected the request.",
+        };
+      }
 
       const json = await res.json() as Record<string, unknown>;
 

@@ -1091,20 +1091,24 @@ paths:
               irsTest: BOTH
           multipart/form-data:
             schema:
-              allOf:
-                - $ref: '#/components/schemas/ActivityCreateRequest'
-                - type: object
-                  properties:
-                    file:
-                      type: array
-                      items:
-                        type: string
-                        format: binary
-                      description: |
-                        Evidence files to attach (receipts, invoices, documents).
-                        Accepted MIME types: `image/jpeg`, `image/png`, `image/webp`,
-                        `image/gif`, `application/pdf`. Maximum 3 files per activity.
-                        Each file is stored in Firebase Storage and linked to the activity.
+              type: object
+              required:
+                - data
+              properties:
+                data:
+                  type: string
+                  description: |
+                    JSON-encoded string of the ActivityCreateRequest fields.
+                evidence:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: |
+                    Evidence files to attach (receipts, invoices, documents).
+                    Accepted MIME types: `image/jpeg`, `image/png`, `image/webp`,
+                    `image/gif`, `application/pdf`. Maximum 3 files per activity.
+                    Each file is stored in Firebase Storage and linked to the activity.
       responses:
         '201':
           description: Activity created successfully.
@@ -1201,18 +1205,22 @@ paths:
               removeEvidenceIds: ['ev_old123']
           multipart/form-data:
             schema:
-              allOf:
-                - $ref: '#/components/schemas/ActivityUpdateRequest'
-                - type: object
-                  properties:
-                    file:
-                      type: array
-                      items:
-                        type: string
-                        format: binary
-                      description: |
-                        New evidence files to attach. Combined with existing evidence,
-                        total cannot exceed 3 files per activity.
+              type: object
+              required:
+                - data
+              properties:
+                data:
+                  type: string
+                  description: |
+                    JSON-encoded string of the ActivityUpdateRequest fields.
+                evidence:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: |
+                    New evidence files to attach. Combined with existing evidence,
+                    total cannot exceed 3 files per activity.
       responses:
         '200':
           description: Activity updated successfully. Returns the full updated activity.
