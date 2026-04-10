@@ -89,25 +89,31 @@ export function registerActivityTools(server: McpServer, client: RepHelperClient
             "Administrative & Compliance",
           ])
           .describe("Activity category"),
+        activityType: z
+          .enum(["MATERIAL", "GENERAL_RE", "NON_QUALIFYING"])
+          .describe(
+            "Activity type for IRS classification. " +
+            "MATERIAL = material participation (counts toward both material participation and qualifying hours). " +
+            "GENERAL_RE = general real estate (counts toward qualifying hours only). " +
+            "NON_QUALIFYING = does not count toward REP compliance.",
+          ),
         startTime: z.string().describe("Start time in ISO 8601 format (e.g. 2026-04-06T09:00:00Z)"),
         endTime: z.string().describe("End time in ISO 8601 format (e.g. 2026-04-06T11:00:00Z)"),
-        description: z.string().optional().describe("Detailed description of the activity"),
-        propertyId: z.string().optional().describe("ID of the associated property"),
-        isMaterialParticipation: z
-          .boolean()
-          .optional()
-          .describe("Whether this counts toward material participation tests (default false)"),
-        isQualifying: z
-          .boolean()
-          .optional()
-          .describe("Whether this counts toward REP qualifying hours (default false)"),
-        qualificationReason: z.string().optional().describe("Reason for qualification"),
+        durationMinutes: z
+          .number()
+          .int()
+          .min(1)
+          .describe("Activity duration in minutes (e.g. 75 for 1h 15m). Must match startTime/endTime span."),
+        description: z.string().describe("Detailed description of the activity for IRS documentation"),
+        propertyId: z
+          .string()
+          .nullable()
+          .describe("ID of the associated property. Use null for account-level activities not tied to a specific property (e.g. property acquisition)."),
+        isDraft: z.boolean().optional().describe("Whether this is a draft (default false)"),
         irsTest: z
           .enum(["750_HOURS", "MORE_THAN_50_PERCENT", "BOTH", "NONE"])
           .optional()
           .describe("Which IRS test this activity applies to (default NONE)"),
-        isDraft: z.boolean().optional().describe("Whether this is a draft (default false)"),
-        durationMinutes: z.number().int().optional().describe("Override computed duration in minutes"),
         teamMemberId: z.string().optional().describe("Team member who performed the activity"),
         tripIds: z
           .array(z.string())
@@ -120,9 +126,14 @@ export function registerActivityTools(server: McpServer, client: RepHelperClient
       },
     },
     async (args) => {
-      const { evidenceFiles, ...body } = args;
+      const { evidenceFiles, activityType, ...body } = args;
+      const apiBody = {
+        ...body,
+        isMaterialParticipation: activityType === "MATERIAL",
+        isQualifying: activityType === "MATERIAL" || activityType === "GENERAL_RE",
+      };
       try {
-        const result = await client.post("/v1/activities", body, evidenceFiles);
+        const result = await client.post("/v1/activities", apiBody, evidenceFiles);
         return toToolResult(result);
       } catch (err) {
         return {
@@ -153,19 +164,26 @@ export function registerActivityTools(server: McpServer, client: RepHelperClient
           ])
           .optional()
           .describe("New category"),
+        activityType: z
+          .enum(["MATERIAL", "GENERAL_RE", "NON_QUALIFYING"])
+          .optional()
+          .describe(
+            "Update activity type. " +
+            "MATERIAL = material participation. " +
+            "GENERAL_RE = general real estate (qualifying only). " +
+            "NON_QUALIFYING = does not count toward REP compliance.",
+          ),
         startTime: z.string().optional().describe("New start time (ISO 8601)"),
         endTime: z.string().optional().describe("New end time (ISO 8601)"),
+        durationMinutes: z.number().int().min(1).optional().describe("Update duration in minutes"),
         description: z.string().optional().describe("New description"),
-        propertyId: z.string().optional().describe("New property ID (or empty string to unlink)"),
-        isMaterialParticipation: z.boolean().optional().describe("Update material participation flag"),
-        isQualifying: z.boolean().optional().describe("Update qualifying hours flag"),
-        qualificationReason: z.string().optional().describe("Update qualification reason"),
+        propertyId: z.string().nullable().optional().describe("New property ID, or null to unlink"),
+        isDraft: z.boolean().optional().describe("Update draft status"),
         irsTest: z
           .enum(["750_HOURS", "MORE_THAN_50_PERCENT", "BOTH", "NONE"])
           .optional()
           .describe("Update IRS test"),
-        isDraft: z.boolean().optional().describe("Update draft status"),
-        durationMinutes: z.number().int().optional().describe("Override duration in minutes"),
+        teamMemberId: z.string().optional().describe("Update team member"),
         tripIds: z
           .array(z.string())
           .optional()
@@ -181,9 +199,14 @@ export function registerActivityTools(server: McpServer, client: RepHelperClient
       },
     },
     async (args) => {
-      const { id, evidenceFiles, ...body } = args;
+      const { id, evidenceFiles, activityType, ...body } = args;
+      const apiBody: Record<string, unknown> = { ...body };
+      if (activityType !== undefined) {
+        apiBody.isMaterialParticipation = activityType === "MATERIAL";
+        apiBody.isQualifying = activityType === "MATERIAL" || activityType === "GENERAL_RE";
+      }
       try {
-        const result = await client.put(`/v1/activities/${id}`, body, evidenceFiles);
+        const result = await client.put(`/v1/activities/${id}`, apiBody, evidenceFiles);
         return toToolResult(result);
       } catch (err) {
         return {
