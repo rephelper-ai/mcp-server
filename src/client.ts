@@ -104,12 +104,21 @@ function buildMultipartBody(
   filePaths: string[],
 ): { body: FormData; } {
   const formData = new FormData();
-  formData.append("data", JSON.stringify(data));
+
+  // Append each field individually to match the API's multipart schema
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value) || typeof value === "object") {
+      formData.append(key, JSON.stringify(value));
+    } else {
+      formData.append(key, String(value));
+    }
+  }
 
   for (const filePath of filePaths) {
     const file = validateFile(filePath);
     const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimeType });
-    formData.append("evidence", blob, file.filename);
+    formData.append("file", blob, file.filename);
   }
 
   return { body: formData };

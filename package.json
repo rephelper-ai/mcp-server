@@ -1,6 +1,6 @@
 {
   "name": "@rephelper/mcp-server",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "MCP server for REP Helper — let AI agents manage real estate activities and properties",
   "type": "module",
   "bin": {
