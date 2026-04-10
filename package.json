@@ -1,6 +1,6 @@
 {
   "name": "@rephelper/mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for REP Helper — let AI agents manage real estate activities and properties",
   "type": "module",
   "bin": {
@@ -12,7 +12,14 @@
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["mcp", "rephelper", "real-estate", "ai", "claude", "model-context-protocol"],
+  "keywords": [
+    "mcp",
+    "rephelper",
+    "real-estate",
+    "ai",
+    "claude",
+    "model-context-protocol"
+  ],
   "author": "REP Helper <support@rephelper.ai>",
   "license": "MIT",
   "repository": {
