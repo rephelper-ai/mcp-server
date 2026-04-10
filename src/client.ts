@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "fs";
-import { basename, extname } from "path";
+import { execFileSync } from "child_process";
+import { basename, extname, resolve } from "path";
 
 const MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -117,6 +118,90 @@ function buildMultipartBody(
   return { body: formData };
 }
 
+/**
+ * Execute a multipart file upload via curl to avoid Cloudflare bot challenges
+ * against Node.js's undici TLS fingerprint.
+ */
+function requestWithCurl<T = unknown>(
+  method: string,
+  url: string,
+  token: string,
+  data: Record<string, unknown>,
+  filePaths: string[],
+): ApiResult<T> {
+  // Validate files first (before spawning curl)
+  for (const fp of filePaths) validateFile(fp);
+
+  const args = [
+    "-s", "--max-time", "30",
+    "-w", "\n__HTTP_STATUS__%{http_code}",
+    "-X", method,
+    "-H", `Authorization: Bearer ${token}`,
+    "-F", `data=${JSON.stringify(data)}`,
+  ];
+
+  for (const fp of filePaths) {
+    const absPath = resolve(fp);
+    const ext = extname(fp).toLowerCase();
+    const mimeType = MIME_TYPES[ext]!;
+    args.push("-F", `evidence=@${absPath};type=${mimeType}`);
+  }
+
+  args.push(url);
+
+  try {
+    const output = execFileSync("curl", args, {
+      encoding: "utf-8",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+
+    const statusMatch = output.match(/__HTTP_STATUS__(\d+)/);
+    const httpStatus = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+    const body = output.replace(/\n__HTTP_STATUS__\d+$/, "");
+
+    if (!body || !body.startsWith("{")) {
+      const titleMatch = body.match(/<title>([^<]*)<\/title>/i);
+      const hint = titleMatch?.[1]?.trim();
+      const detail = hint ? `${httpStatus} ${hint}` : `${httpStatus}`;
+      return {
+        ok: false,
+        status: httpStatus,
+        code: "non_json_response",
+        message:
+          `Server returned an unexpected response (${detail}). ` +
+          "The API may be experiencing issues, or a proxy/CDN rejected the request.",
+      };
+    }
+
+    const json = JSON.parse(body) as Record<string, unknown>;
+
+    if (httpStatus >= 400) {
+      const error = json.error as { code: string; message: string } | undefined;
+      const code = error?.code ?? "unknown";
+      const message = error?.message ?? `HTTP ${httpStatus}`;
+      return {
+        ok: false,
+        status: httpStatus,
+        code,
+        message: formatErrorMessage(httpStatus, code, message),
+      };
+    }
+
+    return {
+      ok: true,
+      data: json.data as T,
+      meta: json.meta as { requestId: string; tokenPrefix: string },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      code: "network_error",
+      message: `File upload failed: ${err instanceof Error ? err.message : String(err)}. Ensure curl is installed and accessible.`,
+    };
+  }
+}
+
 export function createClient(config: ClientConfig) {
   const { apiToken, baseUrl } = config;
 
@@ -146,23 +231,21 @@ export function createClient(config: ClientConfig) {
       ...options?.headers,
     };
 
-    let fetchBody: BodyInit | undefined;
-
+    // Use curl for multipart file uploads to avoid Cloudflare bot challenges
+    // against Node.js's TLS fingerprint. Non-file requests use fetch normally.
     if (options?.files && options.files.length > 0) {
-      // Multipart request (for evidence uploads)
-      const { body: formData } = buildMultipartBody(options.body ?? {}, options.files);
-      fetchBody = formData;
-      // Don't set Content-Type — fetch sets it with the boundary
-    } else if (options?.body) {
+      return requestWithCurl<T>(method, url.toString(), apiToken, options.body ?? {}, options.files);
+    }
+
+    if (options?.body) {
       headers["Content-Type"] = "application/json";
-      fetchBody = JSON.stringify(options.body);
     }
 
     try {
       const res = await fetch(url.toString(), {
         method,
         headers,
-        body: fetchBody,
+        body: options?.body ? JSON.stringify(options.body) : undefined,
       });
 
       // Detect non-JSON responses (HTML error pages from proxies, CDN, or server)
