@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: REP Helper API
-  version: 1.0.0
+  version: 0.1.5
   description: |
     The REP Helper REST API allows Elite-tier subscribers to programmatically manage
     their real estate activities and properties for IRS Real Estate Professional (REP)
@@ -1069,13 +1069,9 @@ paths:
       operationId: createActivity
       summary: Create activity
       description: |
-        Log a new real estate activity (hours entry). Records time spent on property
-        management, maintenance, etc. for IRS REP qualification tracking. Optionally
-        associate trips (travel time added to duration) and attach evidence files.
-
-        Returns `201` with the full activity object.
-
-        **Required permission:** `activities:create`
+        Log a new real estate activity for IRS REP qualification tracking.
+        Optionally associate trips and attach evidence files.
+        Required permission: activities:create
       tags:
         - Activities
       requestBody:
@@ -1236,14 +1232,6 @@ paths:
           schema:
             type: string
           example: 'xK9mN3pQ7rTvWyZa'
-        - name: X-Confirm-Delete
-          in: header
-          description: Safety guard — must be `true` to confirm deletion.
-          required: true
-          schema:
-            type: string
-            enum: ['true']
-          example: 'true'
       responses:
         '200':
           description: Activity soft-deleted successfully.
@@ -1532,14 +1520,6 @@ paths:
           schema:
             type: string
           example: 'prop_def456'
-        - name: X-Confirm-Delete
-          in: header
-          description: Safety guard — must be `true` to confirm deletion.
-          required: true
-          schema:
-            type: string
-            enum: ['true']
-          example: 'true'
       responses:
         '200':
           description: Property soft-deleted successfully.
