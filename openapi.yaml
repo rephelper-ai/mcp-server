@@ -62,8 +62,8 @@ info:
 
     ## Pagination
 
-    List endpoints support cursor-based pagination. Pass the `id` of the last
-    item in the current page as `startAfter` to fetch the next page.
+    List endpoints support a `limit` parameter (default 50, max 100) to control
+    the number of results returned.
 
     ## Soft Deletes
 
@@ -151,6 +151,23 @@ components:
         - **MORE_THAN_50_PERCENT** — Counts toward the >50% test only
         - **BOTH** — Counts toward both tests
         - **NONE** — Does not count toward either REP test
+
+    ActivityType:
+      type: string
+      enum:
+        - MATERIAL
+        - GENERAL_RE
+        - NON_QUALIFYING
+      description: |
+        Activity type for IRS classification. Determines how the activity counts
+        toward REP qualification.
+        - **MATERIAL** — Material participation. Counts toward both material
+          participation tests and qualifying hours (sets `isMaterialParticipation: true`,
+          `isQualifying: true`).
+        - **GENERAL_RE** — General real estate activity. Counts toward qualifying
+          hours only (sets `isMaterialParticipation: false`, `isQualifying: true`).
+        - **NON_QUALIFYING** — Does not count toward REP compliance
+          (sets `isMaterialParticipation: false`, `isQualifying: false`).
 
     PropertyType:
       type: string
@@ -398,159 +415,159 @@ components:
 
     ActivityCreateRequest:
       type: object
-      description: |
-        Request body to create a new activity. Supports both `application/json`
-        and `multipart/form-data` (the latter when attaching evidence files).
+      description: Request body to create a new activity.
       required:
         - title
         - category
+        - activityType
         - startTime
         - endTime
+        - durationMinutes
+        - description
+        - propertyId
       properties:
         title:
           type: string
-          description: Short descriptive title of the activity.
+          description: Activity title/summary (e.g. 'Property inspection at 123 Main St').
           example: 'Coordinated plumber visit for unit 3B leak repair'
         category:
           $ref: '#/components/schemas/ActivityCategory'
+        activityType:
+          $ref: '#/components/schemas/ActivityType'
         startTime:
           type: string
           format: date-time
-          description: Activity start time (ISO 8601 or any date string parseable by `new Date()`).
+          description: Start time in ISO 8601 format.
           example: '2025-03-15T09:00:00.000Z'
         endTime:
           type: string
           format: date-time
-          description: Activity end time (ISO 8601 or any date string parseable by `new Date()`).
+          description: End time in ISO 8601 format.
           example: '2025-03-15T11:30:00.000Z'
+        durationMinutes:
+          type: integer
+          minimum: 1
+          description: |
+            Activity duration in minutes (e.g. 75 for 1h 15m). Must match the
+            startTime/endTime span. When `tripIds` is also provided, trip time
+            is added on top of this value.
+          example: 150
         description:
           type: string
-          description: Detailed notes about the activity.
+          description: Detailed description of the activity for IRS documentation.
           example: 'Supervised licensed plumber repairing burst pipe under kitchen sink.'
         propertyId:
           type: string
+          nullable: true
           description: |
-            ID of the property this activity relates to. Must belong to this account.
-            Omit or pass `null` for account-level activities not tied to a specific property.
+            ID of the associated property. Must belong to this account.
+            Use `null` for account-level activities not tied to a specific property
+            (e.g. property acquisition).
           example: 'prop_def456'
-        teamMemberId:
-          type: string
-          description: |
-            ID of a team member (`accounts/{accountId}/members/{memberId}`) who performed
-            this activity. When set, the activity is attributed to that member.
-          example: 'mem_ghi012'
-        isMaterialParticipation:
-          type: boolean
-          default: false
-          description: Whether this activity counts toward material participation tests.
-          example: true
-        isQualifying:
-          type: boolean
-          default: false
-          description: Whether this activity counts as a qualifying activity for REP status.
-          example: true
-        qualificationReason:
-          type: string
-          description: Free-text explanation of why the activity qualifies for REP status.
-          example: 'Management of long-term rental property'
-        irsTest:
-          $ref: '#/components/schemas/IrsTest'
-          default: 'NONE'
         isDraft:
           type: boolean
           default: false
           description: |
             When `true`, the activity is saved as a draft and excluded from metrics
             until you update it with `isDraft: false`.
-        durationMinutes:
-          type: integer
-          description: |
-            Override the computed duration in minutes. When omitted, duration is
-            calculated as `Math.round((endTime - startTime) / 60000)`.
-            When `tripIds` is also provided, trip time is added on top of this value.
-          example: 150
+        irsTest:
+          $ref: '#/components/schemas/IrsTest'
+          default: 'NONE'
+        teamMemberId:
+          type: string
+          description: Team member who performed the activity.
+          example: 'mem_ghi012'
         tripIds:
           type: array
           items:
             type: string
           maxItems: 3
           description: |
-            Array of trip document IDs to associate with this activity. Each trip's
-            `durationMinutes` is added to the activity's duration. Maximum 3 trips.
+            Trip IDs to associate (max 3). Travel time is added to activity duration.
             Trips must belong to this account and not be assigned to another activity.
           example: ['trip_111', 'trip_222']
+        evidenceFiles:
+          type: array
+          items:
+            type: string
+          maxItems: 3
+          description: |
+            Local file paths to attach as evidence (max 3 files per activity).
+            Accepted types: JPEG, PNG, WebP, PDF. Maximum 10MB per file.
 
     ActivityUpdateRequest:
       type: object
       description: |
         Request body to update an existing activity. All fields are optional —
-        only provided fields are updated. Supports both `application/json` and
-        `multipart/form-data` (the latter when adding new evidence files).
+        only provided fields are updated.
       properties:
         title:
           type: string
-          description: New title for the activity.
+          description: New title.
           example: 'Updated: coordinated plumber visit for unit 3B'
-        description:
-          type: string
-          description: Updated notes.
-          example: 'Repair completed. Invoice filed.'
         category:
           $ref: '#/components/schemas/ActivityCategory'
+        activityType:
+          $ref: '#/components/schemas/ActivityType'
         startTime:
           type: string
           format: date-time
-          description: Updated start time.
+          description: New start time (ISO 8601).
           example: '2025-03-15T09:30:00.000Z'
         endTime:
           type: string
           format: date-time
-          description: Updated end time.
+          description: New end time (ISO 8601).
           example: '2025-03-15T12:00:00.000Z'
         durationMinutes:
           type: integer
-          description: Override for the activity duration in minutes.
+          minimum: 1
+          description: Update duration in minutes.
           example: 150
+        description:
+          type: string
+          description: New description.
+          example: 'Repair completed. Invoice filed.'
         propertyId:
           type: string
           nullable: true
           description: |
-            Update the associated property. Pass `null` to disassociate from any property.
+            New property ID, or `null` to unlink from any property.
             Must belong to this account if non-null.
           example: 'prop_def456'
-        isMaterialParticipation:
-          type: boolean
-          description: Update the material participation flag.
-        isQualifying:
-          type: boolean
-          description: Update the qualifying flag.
-        qualificationReason:
-          type: string
-          nullable: true
-          description: Updated qualification reason.
-        irsTest:
-          $ref: '#/components/schemas/IrsTest'
         isDraft:
           type: boolean
-          description: Publish a draft (`false`) or convert back to draft (`true`).
+          description: Update draft status.
+        irsTest:
+          $ref: '#/components/schemas/IrsTest'
+        teamMemberId:
+          type: string
+          description: Update team member.
         tripIds:
           type: array
           items:
             type: string
           maxItems: 3
           description: |
-            Replace the full set of associated trip IDs. Trips removed from the list
-            are unassigned; new trips are validated and assigned. Maximum 3 trips.
+            Replace trip list (max 3). Travel time is recalculated.
+            Trips removed from the list are unassigned; new trips are validated.
           example: ['trip_333']
         removeEvidenceIds:
           type: array
           items:
             type: string
           description: |
-            Array of evidence document IDs to unlink from this activity.
-            Evidence documents are not deleted — they remain in your account but
-            are no longer associated with this activity.
+            Evidence IDs to unlink from this activity.
+            Evidence documents are not deleted — they remain in your account.
           example: ['ev_jkl345']
+        evidenceFiles:
+          type: array
+          items:
+            type: string
+          maxItems: 3
+          description: |
+            New local file paths to attach as evidence (max 3 total per activity).
+            Accepted types: JPEG, PNG, WebP, PDF. Maximum 10MB per file.
 
     # --- Property schemas ---
 
@@ -763,17 +780,6 @@ components:
         default: 50
       example: 25
 
-    StartAfterParam:
-      name: startAfter
-      in: query
-      description: |
-        Cursor for pagination. Pass the `id` of the last item from the previous
-        page to fetch the next page of results.
-      required: false
-      schema:
-        type: string
-      example: 'xK9mN3pQ7rTvWyZa'
-
     ActivityIdParam:
       name: id
       in: path
@@ -981,13 +987,6 @@ paths:
             maximum: 100
             default: 50
           example: 25
-        - name: startAfter
-          in: query
-          description: Cursor for pagination. Pass the id of the last item from the previous page.
-          required: false
-          schema:
-            type: string
-          example: 'xK9mN3pQ7rTvWyZa'
         - name: propertyId
           in: query
           description: Filter activities to a specific property ID.
@@ -1070,7 +1069,13 @@ paths:
       operationId: createActivity
       summary: Create activity
       description: |
-        Creates a new activity. Supports JSON or multipart/form-data (to attach up to 3 evidence files). Returns 201 with the full activity object. Permission: activities:create.
+        Log a new real estate activity (hours entry). Records time spent on property
+        management, maintenance, etc. for IRS REP qualification tracking. Optionally
+        associate trips (travel time added to duration) and attach evidence files.
+
+        Returns `201` with the full activity object.
+
+        **Required permission:** `activities:create`
       tags:
         - Activities
       requestBody:
@@ -1082,33 +1087,13 @@ paths:
             example:
               title: Coordinated plumber visit for unit 3B
               category: 'Maintenance & Repairs'
+              activityType: MATERIAL
               startTime: '2025-03-15T09:00:00.000Z'
               endTime: '2025-03-15T11:30:00.000Z'
+              durationMinutes: 150
               description: Supervised licensed plumber repairing burst pipe.
               propertyId: prop_def456
-              isMaterialParticipation: true
-              isQualifying: true
               irsTest: BOTH
-          multipart/form-data:
-            schema:
-              type: object
-              required:
-                - data
-              properties:
-                data:
-                  type: string
-                  description: |
-                    JSON-encoded string of the ActivityCreateRequest fields.
-                evidence:
-                  type: array
-                  items:
-                    type: string
-                    format: binary
-                  description: |
-                    Evidence files to attach (receipts, invoices, documents).
-                    Accepted MIME types: `image/jpeg`, `image/png`, `image/webp`,
-                    `image/gif`, `application/pdf`. Maximum 3 files per activity.
-                    Each file is stored in Firebase Storage and linked to the activity.
       responses:
         '201':
           description: Activity created successfully.
@@ -1182,7 +1167,10 @@ paths:
       operationId: updateActivity
       summary: Update activity
       description: |
-        Partial update of an activity. Supports JSON or multipart/form-data (to attach new evidence files). Use removeEvidenceIds to unlink evidence. Permission: activities:update.
+        Update an existing activity. Only include fields you want to change.
+        Can add/replace trips, attach new evidence files, or remove existing evidence.
+
+        **Required permission:** `activities:update`
       tags:
         - Activities
       parameters:
@@ -1201,26 +1189,9 @@ paths:
               $ref: '#/components/schemas/ActivityUpdateRequest'
             example:
               title: 'Updated: plumber visit for unit 3B — repair complete'
+              activityType: MATERIAL
               isDraft: false
               removeEvidenceIds: ['ev_old123']
-          multipart/form-data:
-            schema:
-              type: object
-              required:
-                - data
-              properties:
-                data:
-                  type: string
-                  description: |
-                    JSON-encoded string of the ActivityUpdateRequest fields.
-                evidence:
-                  type: array
-                  items:
-                    type: string
-                    format: binary
-                  description: |
-                    New evidence files to attach. Combined with existing evidence,
-                    total cannot exceed 3 files per activity.
       responses:
         '200':
           description: Activity updated successfully. Returns the full updated activity.
@@ -1251,7 +1222,10 @@ paths:
       operationId: deleteActivity
       summary: Delete activity (soft delete)
       description: |
-        Soft-deletes an activity. Recoverable within 72 hours via the dashboard. Requires X-Confirm-Delete: true header. Permission: activities:delete.
+        Soft-delete an activity. The activity is hidden from queries but can be
+        recovered within 72 hours via the REP Helper web app.
+
+        **Required permission:** `activities:delete`
       tags:
         - Activities
       parameters:
@@ -1262,6 +1236,14 @@ paths:
           schema:
             type: string
           example: 'xK9mN3pQ7rTvWyZa'
+        - name: X-Confirm-Delete
+          in: header
+          description: Safety guard — must be `true` to confirm deletion.
+          required: true
+          schema:
+            type: string
+            enum: ['true']
+          example: 'true'
       responses:
         '200':
           description: Activity soft-deleted successfully.
@@ -1325,13 +1307,6 @@ paths:
             maximum: 100
             default: 50
           example: 25
-        - name: startAfter
-          in: query
-          description: Cursor for pagination. Pass the id of the last item from the previous page.
-          required: false
-          schema:
-            type: string
-          example: 'xK9mN3pQ7rTvWyZa'
         - name: type
           in: query
           description: Filter by property type.
@@ -1543,7 +1518,10 @@ paths:
       operationId: deleteProperty
       summary: Delete property (soft delete)
       description: |
-        Soft-deletes a property. Recoverable within 72 hours via the dashboard. Requires X-Confirm-Delete: true header. Permission: properties:delete.
+        Soft-delete a property. The property is hidden from queries but can be
+        recovered within 72 hours via the REP Helper web app.
+
+        **Required permission:** `properties:delete`
       tags:
         - Properties
       parameters:
@@ -1554,6 +1532,14 @@ paths:
           schema:
             type: string
           example: 'prop_def456'
+        - name: X-Confirm-Delete
+          in: header
+          description: Safety guard — must be `true` to confirm deletion.
+          required: true
+          schema:
+            type: string
+            enum: ['true']
+          example: 'true'
       responses:
         '200':
           description: Property soft-deleted successfully.
